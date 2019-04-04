@@ -302,9 +302,9 @@ class UnifiedJobTemplate(PolymorphicModel, CommonModelNameNotUnique, Notificatio
     def can_update(self):
         return self._can_update()
 
-    def update(self, **kwargs):
+    def update(self, request=None, **kwargs):
         if self.can_update:
-            unified_job = self.create_unified_job()
+            unified_job = self.create_unified_job(request=request)
             unified_job.signal_start(**kwargs)
             return unified_job
 
@@ -328,6 +328,7 @@ class UnifiedJobTemplate(PolymorphicModel, CommonModelNameNotUnique, Notificatio
         '''
         Create a new unified job based on this unified job template.
         '''
+        request = kwargs.pop('request', {})
         new_job_passwords = kwargs.pop('survey_passwords', {})
         eager_fields = kwargs.pop('_eager_fields', None)
 
@@ -357,6 +358,9 @@ class UnifiedJobTemplate(PolymorphicModel, CommonModelNameNotUnique, Notificatio
                 validated_kwargs.pop(f)
 
         unified_job = copy_model_by_class(self, unified_job_class, fields, validated_kwargs)
+
+        if request and request.META.get('HTTP_X_FROM_TOWER_UI') == '1':
+            unified_job.from_awx_ui = True
 
         if eager_fields:
             for fd, val in eager_fields.items():
@@ -577,6 +581,10 @@ class UnifiedJob(PolymorphicModel, PasswordFieldsModel, CommonModelNameNotUnique
         max_length=20,
         choices=LAUNCH_TYPE_CHOICES,
         default='manual',
+        editable=False,
+    )
+    from_awx_ui = models.NullBooleanField(
+        default=False,
         editable=False,
     )
     schedule = models.ForeignKey( # Which schedule entry was responsible for starting this job.

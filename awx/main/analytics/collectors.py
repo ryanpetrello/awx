@@ -219,6 +219,7 @@ def copy_tables(since, full_path):
                                  main_unifiedjob.name,  
                                  main_unifiedjob.unified_job_template_id, 
                                  main_unifiedjob.launch_type, 
+                                 main_unifiedjob.from_awx_ui,
                                  main_unifiedjob.schedule_id, 
                                  main_unifiedjob.execution_node, 
                                  main_unifiedjob.controller_node, 

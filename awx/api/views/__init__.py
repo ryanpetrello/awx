@@ -804,7 +804,7 @@ class ProjectUpdateView(RetrieveAPIView):
     def post(self, request, *args, **kwargs):
         obj = self.get_object()
         if obj.can_update:
-            project_update = obj.update()
+            project_update = obj.update(request=request)
             if not project_update:
                 return Response({}, status=status.HTTP_400_BAD_REQUEST)
             else:
@@ -2230,7 +2230,7 @@ class InventorySourceUpdateView(RetrieveAPIView):
     def post(self, request, *args, **kwargs):
         obj = self.get_object()
         if obj.can_update:
-            update = obj.update()
+            update = obj.update(request=request)
             if not update:
                 return Response({}, status=status.HTTP_400_BAD_REQUEST)
             else:
@@ -2455,7 +2455,7 @@ class JobTemplateLaunch(RetrieveAPIView):
             raise PermissionDenied()
 
         passwords = serializer.validated_data.pop('credential_passwords', {})
-        new_job = obj.create_unified_job(**serializer.validated_data)
+        new_job = obj.create_unified_job(**serializer.validated_data, request=request)
         result = new_job.signal_start(**passwords)
 
         if not result:
@@ -3226,7 +3226,7 @@ class WorkflowJobTemplateLaunch(WorkflowsEnforcementMixin, RetrieveAPIView):
         if not request.user.can_access(models.JobLaunchConfig, 'add', serializer.validated_data, template=obj):
             raise PermissionDenied()
 
-        new_job = obj.create_unified_job(**serializer.validated_data)
+        new_job = obj.create_unified_job(**serializer.validated_data, request=request)
         new_job.signal_start()
 
         data = OrderedDict()
@@ -3450,7 +3450,7 @@ class SystemJobTemplateLaunch(GenericAPIView):
     def post(self, request, *args, **kwargs):
         obj = self.get_object()
 
-        new_job = obj.create_unified_job(extra_vars=request.data.get('extra_vars', {}))
+        new_job = obj.create_unified_job(extra_vars=request.data.get('extra_vars', {}), request=request)
         new_job.signal_start()
         data = OrderedDict()
         data['system_job'] = new_job.id

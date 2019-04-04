@@ -16,6 +16,7 @@
             return {
                 request: function (config) {
                     config.headers['X-Requested-With'] = 'XMLHttpRequest';
+                    config.headers['X-From-Tower-UI'] = '1';
                     if (['GET', 'HEAD', 'OPTIONS'].indexOf(config.method)===-1) {
                         config.headers['X-CSRFToken'] = $cookies.get('csrftoken');
                     }
