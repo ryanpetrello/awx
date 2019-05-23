@@ -265,6 +265,10 @@ def handle_setting_changes(setting_keys):
     cache_keys = set(setting_keys)
     logger.debug('cache delete_many(%r)', cache_keys)
     cache.delete_many(cache_keys)
+    for key in cache_keys:
+        if key.startswith('LOG_AGGREGATOR_'):
+            reconfigure_logging.apply_async()
+            break
 
 
 @task(queue='tower_broadcast_all', exchange_type='fanout')
@@ -283,6 +287,12 @@ def delete_project_files(project_path):
             logger.debug('Success removing {}'.format(lock_file))
         except Exception:
             logger.exception('Could not remove lock file {}'.format(lock_file))
+
+
+@task(queue='tower_broadcast_all', exchange_type='fanout')
+def reconfigure_logging():
+    from awx.main.utils.handlers import SysLogNGHandler
+    SysLogNGHandler.reconfigure()
 
 
 @task(queue='tower_broadcast_all', exchange_type='fanout')

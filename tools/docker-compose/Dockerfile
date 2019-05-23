@@ -73,7 +73,12 @@ RUN yum -y install acl \
   xorg-x11-utils \
   yum-utils
 
+RUN yum install -y https://copr-be.cloud.fedoraproject.org/results/czanik/syslog-ng321/epel-7-x86_64/00911683-syslog-ng/syslog-ng-3.21.1-3.el7.x86_64.rpm
+RUN yum install -y https://copr-be.cloud.fedoraproject.org/results/czanik/syslog-ng321/epel-7-x86_64/00911683-syslog-ng/syslog-ng-http-3.21.1-3.el7.x86_64.rpm
 RUN yum install -y https://github.com/krallin/tini/releases/download/v0.18.0/tini_0.18.0.rpm
+
+RUN chown -R awx:root /var/lib/syslog-ng/
+RUN chown -R awx:root /etc/syslog-ng/
 
 RUN /usr/bin/ssh-keygen -q -t rsa -N "" -f /root/.ssh/id_rsa
 RUN mkdir -p /data/db

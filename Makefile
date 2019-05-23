@@ -326,6 +326,9 @@ jupyter:
 	fi; \
 	$(MANAGEMENT_COMMAND) shell_plus --notebook
 
+syslog:
+	syslog-ng -F -u awx
+
 reports:
 	mkdir -p $@
 

@@ -11,18 +11,16 @@ from django.conf import settings
 logger = logging.getLogger('awx.main.utils.reload')
 
 
-def _supervisor_service_command(command, communicate=True):
+def _supervisor_service_command(command, communicate=True, target=None):
     '''
     example use pattern of supervisorctl:
     # supervisorctl restart tower-processes:receiver tower-processes:factcacher
     '''
-    group_name = 'tower-processes'
-    if settings.DEBUG:
-        group_name = 'awx-processes'
-    args = ['supervisorctl']
-    if settings.DEBUG:
-        args.extend(['-c', '/supervisor.conf'])
-    args.extend([command, '{}:*'.format(group_name)])
+    args = [
+        'supervisorctl',
+        command,
+        'tower-processes:{}'.format(target or '*')
+    ]
     logger.debug('Issuing command to {} services, args={}'.format(command, args))
     supervisor_process = subprocess.Popen(args, stdin=subprocess.PIPE,
                                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -37,6 +35,10 @@ def _supervisor_service_command(command, communicate=True):
                 command, restart_stdout.strip()))
     else:
         logger.info('Submitted supervisorctl {} command, not waiting for result'.format(command))
+
+
+def reload_syslog():
+    _supervisor_service_command(command='restart', target='awx-syslog', communicate=True)
 
 
 def stop_local_services(communicate=True):

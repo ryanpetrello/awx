@@ -26,7 +26,6 @@ from awx.api.generics import (
 from awx.api.permissions import IsSuperUser
 from awx.api.versioning import reverse, get_request_version
 from awx.main.utils import camelcase_to_underscore
-from awx.main.utils.handlers import AWXProxyHandler, LoggingConnectivityException
 from awx.main.tasks import handle_setting_changes
 from awx.conf.models import Setting
 from awx.conf.serializers import SettingCategorySerializer, SettingSingletonSerializer
@@ -196,17 +195,14 @@ class SettingLoggingTest(GenericAPIView):
                 settings, 'LOG_AGGREGATOR_PASSWORD', ''
             )
 
-        try:
-            class MockSettings:
-                pass
-            mock_settings = MockSettings()
-            for k, v in serializer.validated_data.items():
-                setattr(mock_settings, k, v)
-            AWXProxyHandler().perform_test(custom_settings=mock_settings)
-            if mock_settings.LOG_AGGREGATOR_PROTOCOL.upper() == 'UDP':
-                return Response(status=status.HTTP_201_CREATED)
-        except LoggingConnectivityException as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        class MockSettings:
+            pass
+        mock_settings = MockSettings()
+        for k, v in serializer.validated_data.items():
+            setattr(mock_settings, k, v)
+        # TODO!
+        if mock_settings.LOG_AGGREGATOR_PROTOCOL.upper() == 'UDP':
+            return Response(status=status.HTTP_201_CREATED)
         return Response(status=status.HTTP_200_OK)
 
 

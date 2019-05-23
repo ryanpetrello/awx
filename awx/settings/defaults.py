@@ -1007,9 +1007,10 @@ LOGGING = {
             'formatter': 'simple',
         },
         'external_logger': {
-            'class': 'awx.main.utils.handlers.AWXProxyHandler',
+            'class': 'awx.main.utils.handlers.SysLogNGHandler',
             'formatter': 'json',
             'filters': ['external_log_enabled', 'dynamic_level_filter'],
+            'address': '/tmp/syslog-ng.sock',
         },
         'mail_admins': {
             'level': 'ERROR',
