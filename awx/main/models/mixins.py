@@ -9,7 +9,7 @@ from django.apps import apps
 from django.conf import settings
 from django.db import models
 from django.contrib.contenttypes.models import ContentType
-from django.contrib.auth.models import User # noqa
+from django.contrib.auth.models import User, AnonymousUser # noqa
 from django.utils.translation import ugettext_lazy as _
 from django.core.exceptions import ValidationError
 from django.db.models.query import QuerySet
@@ -55,7 +55,9 @@ class ResourceMixin(models.Model):
 
     @staticmethod
     def _accessible_pk_qs(cls, accessor, role_field, content_types=None):
-        if type(accessor) == User:
+        if type(accessor) == AnonymousUser:
+            ancestor_roles = []
+        elif type(accessor) == User:
             ancestor_roles = accessor.roles.all()
         elif type(accessor) == Role:
             ancestor_roles = [accessor]

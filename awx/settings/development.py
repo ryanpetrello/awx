@@ -117,7 +117,6 @@ if 'django_jenkins' in INSTALLED_APPS:
 # debug toolbar and swagger assume that requirements/requirements_dev.txt are installed
 
 INSTALLED_APPS += [   # NOQA
-    'rest_framework_swagger',
     'debug_toolbar',
 ]
 

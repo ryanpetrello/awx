@@ -152,8 +152,3 @@ urlpatterns = [
     ), name='logout'),
     url(r'^o/', include(oauth2_root_urls)),
 ]
-if settings.SETTINGS_MODULE == 'awx.settings.development':
-    from awx.api.swagger import SwaggerSchemaView
-    urlpatterns += [
-        url(r'^swagger/$', SwaggerSchemaView.as_view(), name='swagger_view'),
-    ]

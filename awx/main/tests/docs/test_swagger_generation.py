@@ -4,12 +4,14 @@ import re
 
 from django.conf import settings
 from django.core.serializers.json import DjangoJSONEncoder
+from django.test.client import RequestFactory
 from django.utils.functional import Promise
 from django.utils.encoding import force_text
 
-from openapi_codec.encode import generate_swagger_object
+from rest_framework.request import Request
 import pytest
 
+from awx.api.swagger import generate
 from awx.api.versioning import drf_reverse
 
 
@@ -40,44 +42,9 @@ class TestSwaggerGeneration():
     JSON = {}
 
     @pytest.fixture(autouse=True, scope='function')
-    def _prepare(self, get, admin):
+    def _prepare(self, get):
         if not self.__class__.JSON:
-            url = drf_reverse('api:swagger_view') + '?format=openapi'
-            response = get(url, user=admin)
-            data = generate_swagger_object(response.data)
-            if response.has_header('X-Deprecated-Paths'):
-                data['deprecated_paths'] = json.loads(response['X-Deprecated-Paths'])
-            data.update(response.accepted_renderer.get_customizations() or {})
-
-            data['host'] = None
-            if not pytest.config.getoption("--genschema"):
-                data['modified'] = datetime.datetime.utcnow().isoformat()
-            data['schemes'] = ['https']
-            data['consumes'] = ['application/json']
-
-            revised_paths = {}
-            deprecated_paths = data.pop('deprecated_paths', [])
-            for path, node in data['paths'].items():
-                # change {version} in paths to the actual default API version (e.g., v2)
-                revised_paths[path.replace(
-                    '{version}',
-                    settings.REST_FRAMEWORK['DEFAULT_VERSION']
-                )] = node
-                for method in node:
-                    if path in deprecated_paths:
-                        node[method]['deprecated'] = True
-                    if 'description' in node[method]:
-                        # Pop off the first line and use that as the summary
-                        lines = node[method]['description'].splitlines()
-                        node[method]['summary'] = lines.pop(0).strip('#:')
-                        node[method]['description'] = '\n'.join(lines)
-
-                    # remove the required `version` parameter
-                    for param in node[method].get('parameters'):
-                        if param['in'] == 'path' and param['name'] == 'version':
-                            node[method]['parameters'].remove(param)
-            data['paths'] = revised_paths
-            self.__class__.JSON = data
+            self.__class__.JSON = generate()
 
     def test_sanity(self, release):
         JSON = self.__class__.JSON

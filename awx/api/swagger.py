@@ -1,11 +1,18 @@
+import datetime
 import json
 import warnings
 
 from coreapi.document import Object, Link
 
+from django.conf import settings
+from django.test.client import RequestFactory
+
+from openapi_codec.encode import generate_swagger_object
+
 from rest_framework import exceptions
 from rest_framework.permissions import AllowAny
 from rest_framework.renderers import CoreJSONRenderer
+from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.schemas import SchemaGenerator, AutoSchema as DRFAuthSchema
 from rest_framework.views import APIView
@@ -41,13 +48,13 @@ class AutoSchema(DRFAuthSchema):
 
         # auto-generate a topic/tag for the serializer based on its model
         if hasattr(self.view, 'swagger_topic'):
-            link.__dict__['topic'] = str(self.view.swagger_topic).title()
+            link.__dict__['topic'] = str(self.view.swagger_topic).lower()
         elif serializer and hasattr(serializer, 'Meta'):
             link.__dict__['topic'] = str(
                 serializer.Meta.model._meta.verbose_name_plural
-            ).title()
+            ).lower()
         elif hasattr(self.view, 'model'):
-            link.__dict__['topic'] = str(self.view.model._meta.verbose_name_plural).title()
+            link.__dict__['topic'] = str(self.view.model._meta.verbose_name_plural).lower()
         else:
             warnings.warn('Could not determine a Swagger tag for path {}'.format(path))
         return link
@@ -112,3 +119,42 @@ class SwaggerSchemaView(APIView):
             schema,
             headers={'X-Deprecated-Paths': json.dumps(_deprecated)}
         )
+
+
+def generate():
+    request = Request(RequestFactory().get('/api/swagger/?format=openapi'))
+    response = SwaggerSchemaView().get(request)
+    data = generate_swagger_object(response.data)
+    if response.has_header('X-Deprecated-Paths'):
+        data['deprecated_paths'] = json.loads(response['X-Deprecated-Paths'])
+
+    data['host'] = 'awx.example.org'
+    #data['modified'] = datetime.datetime.utcnow().isoformat()
+    data['schemes'] = ['https']
+    data['consumes'] = ['application/json']
+
+    revised_paths = {}
+    deprecated_paths = data.pop('deprecated_paths', [])
+    for path, node in data['paths'].items():
+        # change {version} in paths to the actual default API version (e.g., v2)
+        revised_paths[path.replace(
+            '{version}',
+            'v2',
+        )] = node
+        for method in node:
+            if path in deprecated_paths:
+                node[method]['deprecated'] = True
+            if 'description' in node[method]:
+                # Pop off the first line and use that as the summary
+                lines = node[method]['description'].splitlines()
+                node[method]['summary'] = lines.pop(0).strip('#:')
+                node[method]['description'] = '\n'.join(lines)
+
+            # remove the required `version` parameter
+            for param in node[method].get('parameters'):
+                if param['in'] == 'path' and param['name'] == 'version':
+                    node[method]['parameters'].remove(param)
+            node[method]['responses']['default'] = {'description': ''}
+            node[method]['operationId'] = node[method]['operationId'].split('_', 1)[1]
+    data['paths'] = revised_paths
+    return data
