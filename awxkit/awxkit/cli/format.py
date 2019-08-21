@@ -1,3 +1,4 @@
+import locale
 import json
 from distutils.util import strtobool
 
@@ -136,32 +137,48 @@ def format_yaml(output, fmt):
 
 
 def format_human(output, fmt):
+    out = ''
     if fmt == '.':
         fmt = 'id,name'
     column_names = fmt.split(',')
-    try:
-        from tabulate import tabulate
-    except ImportError:
-        raise ImportError(
-            'To use `-f human`, you must install the optional tabulate '
-            'dependency.\n`pip install tabulate`',
-        )
     if 'count' in output:
         output = output['results']
     else:
         output = [output]
 
-    return tabulate(
-        [
-            dict(
-                (col, record.get(col, ''))
-                for col in column_names
-            )
-            for record in output
-        ],
-        headers='keys',
-        tablefmt='rst'
-    )
+    if fmt == '*' and len(output):
+        column_names = list(output[0].keys())
+        for k in ('summary_fields', 'related'):
+            if k in column_names:
+                column_names.remove(k)
+
+    table = [column_names]
+    table.extend([
+        [record.get(col, '') for col in column_names]
+        for record in output
+    ])
+    col_paddings = []
+
+    def format_num(num):
+        try:
+            return locale.format("%.*f", (0, int(num)), True)
+        except (ValueError, TypeError):
+            return str(num)
+
+    # calculate the max width of each column
+    for i, _ in enumerate(column_names):
+        max_width = max([len(format_num(row[i])) for row in table])
+        col_paddings.append(max_width)
+
+    # insert a row of === header lines
+    table.insert(1, ['=' * i for i in col_paddings])
+
+    # print each row of the table data, justified based on col_paddings
+    for row in table:
+        for i, value in enumerate(row):
+            out += format_num(value).ljust(col_paddings[i] + 1)
+        out += '\n'
+    return out
 
 
 FORMATTERS = {
