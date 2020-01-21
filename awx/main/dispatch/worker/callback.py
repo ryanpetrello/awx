@@ -1,3 +1,5 @@
+import io
+import json
 import logging
 import time
 import traceback
@@ -6,6 +8,8 @@ from queue import Empty as QueueEmpty
 from django.utils.timezone import now as tz_now
 from django.db import DatabaseError, OperationalError, connection as django_connection
 from django.db.utils import InterfaceError, InternalError, IntegrityError
+
+from psycopg2.extensions import AsIs
 
 from awx.main.consumers import emit_channel_notification
 from awx.main.models import (JobEvent, AdHocCommandEvent, ProjectUpdateEvent,
@@ -48,13 +52,50 @@ class CallbackBrokerWorker(BaseWorker):
             any([len(events) >= 1000 for events in self.buff.values()])
         ):
             for cls, events in self.buff.items():
-                logger.debug(f'{cls.__name__}.objects.bulk_create({len(events)})')
+                logger.error(f'{cls.__name__}.objects.bulk_create({len(events)})')
                 for e in events:
                     if not e.created:
                         e.created = now
                     e.modified = now
                 try:
-                    cls.objects.bulk_create(events)
+                    fields = []
+                    for f in e._meta.local_fields:
+                        if f.name == 'id':
+                            continue
+                        if f.colname == 'host_id':
+                            continue  # TODO: fixme
+                        fields.append(f.column)
+
+                    buff = io.StringIO()
+                    for e in events:
+                        values = []
+                        for f in fields:
+                            def _serialized(v):
+                                if isinstance(v, dict):
+                                    v = json.dumps(v)
+                                if v is True:
+                                    return 'true'
+                                if v is False:
+                                    return 'false'
+                                v = AsIs(v).getquoted().decode()
+                                v = v.replace('\r\n', '\\r\\n')
+                                return v
+
+                            values.append(_serialized(getattr(e, f)))
+                        buff.write('\t'.join(values) + '\n')
+                    buff.seek(0)
+
+                    fields = ", ".join(fields)
+                    tablename = e._meta.db_table
+                    with django_connection.cursor() as cursor:
+                        cursor.copy_expert(
+                            f'COPY {tablename}('
+                            f'{fields}'
+                            ') FROM STDIN',
+                            buff
+                        )
+                    django_connection.commit()
+                    #cls.objects.bulk_create(events)
                 except Exception as exc:
                     # if an exception occurs, we should re-attempt to save the
                     # events one-by-one, because something in the list is
