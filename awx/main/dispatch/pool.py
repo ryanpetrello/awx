@@ -54,11 +54,14 @@ class PoolWorker(object):
     It is "idle" when self.managed_tasks is empty.
     '''
 
-    def __init__(self, queue_size, target, args):
+    def __init__(self, queue_size, target, args, should_track_task_state=False):
         self.messages_sent = 0
         self.messages_finished = 0
         self.managed_tasks = collections.OrderedDict()
-        self.finished = MPQueue(queue_size)
+        self.finished = None
+        self.should_track_task_state = should_track_task_state
+        if should_track_task_state:
+            self.finished = MPQueue(queue_size)
         self.queue = MPQueue(queue_size)
         self.process = Process(target=target, args=(self.queue, self.finished) + args)
         self.process.daemon = True
@@ -72,7 +75,8 @@ class PoolWorker(object):
             if not body.get('uuid'):
                 body['uuid'] = str(uuid4())
             uuid = body['uuid']
-        self.managed_tasks[uuid] = body
+        if self.should_track_task_state:
+            self.managed_tasks[uuid] = body
         self.queue.put(body, block=True, timeout=5)
         self.messages_sent += 1
         self.calculate_managed_tasks()
@@ -109,6 +113,11 @@ class PoolWorker(object):
         return str(self.process.exitcode)
 
     def calculate_managed_tasks(self):
+        if not self.should_track_task_state:
+            # callback receiver workers don't track this internal state like
+            # the task/dispatcher workers
+            return
+
         # look to see if any tasks were finished
         finished = []
         for _ in range(self.finished.qsize()):
@@ -133,6 +142,9 @@ class PoolWorker(object):
 
     @property
     def current_task(self):
+        if not self.should_track_task_state:
+            return None
+
         self.calculate_managed_tasks()
         # the task at [0] is the one that's running right now (or is about to
         # be running)
@@ -169,6 +181,8 @@ class PoolWorker(object):
 
     @property
     def busy(self):
+        if not self.should_track_task_state:
+            return False
         self.calculate_managed_tasks()
         return len(self.managed_tasks) > 0
 
@@ -210,6 +224,10 @@ class WorkerPool(object):
     def __len__(self):
         return len(self.workers)
 
+    @property
+    def should_track_task_state(self):
+        return False
+
     def init_workers(self, target, *target_args):
         self.target = target
         self.target_args = target_args
@@ -223,7 +241,10 @@ class WorkerPool(object):
         # for the DB and memcached connections (that way lies race conditions)
         django_connection.close()
         django_cache.close()
-        worker = PoolWorker(self.queue_size, self.target, (idx,) + self.target_args)
+        worker = PoolWorker(
+            self.queue_size, self.target, (idx,) + self.target_args,
+            should_track_task_state=self.should_track_task_state
+        )
         self.workers.append(worker)
         try:
             worker.start()
@@ -306,6 +327,10 @@ class AutoscalePool(WorkerPool):
 
         # max workers can't be less than min_workers
         self.max_workers = max(self.min_workers, self.max_workers)
+
+    @property
+    def should_track_task_state(self):
+        return True
 
     @property
     def should_grow(self):

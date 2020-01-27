@@ -15,6 +15,8 @@ from django.apps import apps
 from django.db import models
 from django.conf import settings
 
+import cachetools
+
 from awx.main.constants import LOGGER_BLACKLIST
 from awx.main.utils.common import get_search_fields
 
@@ -33,6 +35,7 @@ class FieldFromSettings(object):
     def __init__(self, setting_name):
         self.setting_name = setting_name
 
+    @cachetools.cached(cache=cachetools.TTLCache(maxsize=128, ttl=1))
     def __get__(self, instance, type=None):
         if self.setting_name in getattr(instance, 'settings_override', {}):
             return instance.settings_override[self.setting_name]

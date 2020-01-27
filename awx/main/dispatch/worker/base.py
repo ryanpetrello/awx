@@ -148,8 +148,8 @@ class BaseWorker(object):
             finally:
                 if 'uuid' in body:
                     uuid = body['uuid']
-                    logger.debug('task {} is finished'.format(uuid))
-                    finished.put(uuid)
+                    if finished:
+                        finished.put(uuid)
         logger.warn('worker exiting gracefully pid:{}'.format(os.getpid()))
 
     def perform_work(self, body):
