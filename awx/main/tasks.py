@@ -26,7 +26,7 @@ import urllib.parse as urlparse
 
 # Django
 from django.conf import settings
-from django.db import transaction, DatabaseError, IntegrityError
+from django.db import transaction, DatabaseError, IntegrityError, ProgrammingError, connection
 from django.db.models.fields.related import ForeignKey
 from django.utils.timezone import now, timedelta
 from django.utils.encoding import smart_str
@@ -59,7 +59,7 @@ from awx.main.models import (
     Inventory, InventorySource, SmartInventoryMembership,
     Job, AdHocCommand, ProjectUpdate, InventoryUpdate, SystemJob,
     JobEvent, ProjectUpdateEvent, InventoryUpdateEvent, AdHocCommandEvent, SystemJobEvent,
-    build_safe_env
+    build_safe_env, enforce_bigint_pk_migration
 )
 from awx.main.constants import ACTIVE_STATES
 from awx.main.exceptions import AwxTaskError
@@ -134,6 +134,12 @@ def dispatch_startup():
     cluster_node_heartbeat()
     if Instance.objects.me().is_controller():
         awx_isolated_heartbeat()
+
+    # at process startup, detect the need to migrate old event records from int
+    # to bigint; at *some point* in the future, once certain versions of AWX
+    # and Tower fall out of use/support, we can probably just _assume_ that
+    # everybody has moved to bigint, and remove this code entirely
+    enforce_bigint_pk_migration()
 
 
 def inform_cluster_of_shutdown():
@@ -658,6 +664,43 @@ def update_host_smart_inventory_memberships():
     # Update computed fields for changed inventories outside atomic action
     for smart_inventory in changed_inventories:
         smart_inventory.update_computed_fields()
+
+
+@task()
+def migrate_legacy_event_data(tblname):
+    if 'event' not in tblname:
+        return
+    with advisory_lock(f'bigint_migration_{tblname}', wait=False) as acquired:
+        if acquired is False:
+            return
+        chunk = 1000000
+
+        def _remaining():
+            try:
+                cursor.execute(f'SELECT MAX(id) FROM _old_{tblname};')
+                return cursor.fetchone()[0]
+            except ProgrammingError:
+                # the table is gone (migration is unnecessary)
+                return None
+
+        with connection.cursor() as cursor:
+            total_rows = _remaining()
+            while total_rows is not None:
+                with transaction.atomic():
+                    cursor.execute(
+                        f'INSERT INTO {tblname} SELECT * FROM _old_{tblname} ORDER BY id DESC LIMIT {chunk};'
+                    )
+                    cursor.execute(
+                        f'DELETE FROM _old_{tblname} WHERE id IN (SELECT id FROM _old_{tblname} ORDER BY id DESC LIMIT {chunk});'
+                    )
+                logger.warn(
+                    f'migrated int -> bigint rows to {tblname} from _old_{tblname}; # ({total_rows} rows remaining)'
+                )
+                total_rows = _remaining()
+
+            if total_rows is None:
+                cursor.execute(f'DROP TABLE IF EXISTS _old_{tblname}')
+                logger.warn(f'{tblname} primary key migration to bigint has finished')
 
 
 @task()
