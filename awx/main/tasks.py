@@ -673,7 +673,7 @@ def migrate_legacy_event_data(tblname):
     with advisory_lock(f'bigint_migration_{tblname}', wait=False) as acquired:
         if acquired is False:
             return
-        chunk = 1000000
+        chunk = 100000
 
         def _remaining():
             try:
@@ -684,23 +684,24 @@ def migrate_legacy_event_data(tblname):
                 return None
 
         with connection.cursor() as cursor:
-            total_rows = _remaining()
-            while total_rows is not None:
+            last = _remaining()
+            while True:
                 with transaction.atomic():
-                    cursor.execute(
-                        f'INSERT INTO {tblname} SELECT * FROM _old_{tblname} ORDER BY id DESC LIMIT {chunk};'
-                    )
-                    cursor.execute(
-                        f'DELETE FROM _old_{tblname} WHERE id IN (SELECT id FROM _old_{tblname} ORDER BY id DESC LIMIT {chunk});'
-                    )
+                    sql = f'INSERT INTO {tblname} SELECT * FROM _old_{tblname} WHERE id <= {last} ORDER BY id DESC LIMIT {chunk} ON CONFLICT DO NOTHING RETURNING id;'
+                    logger.error(sql)
+                    cursor.execute(sql)
+                    inserted = cursor.fetchone()
+                    if inserted:
+                        last = inserted[0]
+                    else:
+                        last -= chunk
+                if last < 0:
+                    cursor.execute(f'DROP TABLE IF EXISTS _old_{tblname}')
+                    logger.warn(f'{tblname} primary key migration to bigint has finished')
+                    break
                 logger.warn(
-                    f'migrated int -> bigint rows to {tblname} from _old_{tblname}; # ({total_rows} rows remaining)'
+                    f'migrated int -> bigint rows to {tblname} from _old_{tblname}; # ({last} rows remaining)'
                 )
-                total_rows = _remaining()
-
-            if total_rows is None:
-                cursor.execute(f'DROP TABLE IF EXISTS _old_{tblname}')
-                logger.warn(f'{tblname} primary key migration to bigint has finished')
 
 
 @task()
