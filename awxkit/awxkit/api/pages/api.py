@@ -224,6 +224,11 @@ class ApiV2(base.Base):
                     # We should only impose a default password if the resource doesn't exist.
                     post_data.setdefault('password', 'abc123')
                 page = endpoint.post(post_data)
+                if resource == 'projects':
+                    # when creating a project, we need to wait for its
+                    # first project update to finish so that associated
+                    # JTs have valid options for playbook names
+                    page.wait_until_completed()
             else:
                 page = page.put(post_data)
 
