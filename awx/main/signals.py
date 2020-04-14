@@ -369,15 +369,22 @@ def emit_activity_stream_change(instance):
         # don't emit activity stream external logs during migrations, it
         # could be really noisy
         return
-    from awx.api.serializers import ActivityStreamSerializer
-    actor = None
-    if instance.actor:
-        actor = instance.actor.username
-    summary_fields = ActivityStreamSerializer(instance).get_summary_fields(instance)
-    analytics_logger.info('Activity Stream update entry for %s' % str(instance.object1),
-                          extra=dict(changes=instance.changes, relationship=instance.object_relationship_type,
-                          actor=actor, operation=instance.operation,
-                          object1=instance.object1, object2=instance.object2, summary_fields=summary_fields))
+
+    def _emit():
+        from awx.api.serializers import ActivityStreamSerializer
+        actor = None
+        if instance.actor:
+            actor = instance.actor.username
+        summary_fields = ActivityStreamSerializer(instance).get_summary_fields(instance)
+        analytics_logger.info('Activity Stream update entry for %s' % str(instance.object1),
+                              extra=dict(changes=instance.changes, relationship=instance.object_relationship_type,
+                              actor=actor, operation=instance.operation,
+                              object1=instance.object1, object2=instance.object2, summary_fields=summary_fields))
+
+    if 'awx-manage' in ' '.join(sys.argv):
+        _emit()
+    else:
+        connection.on_commit(_emit)
 
 
 def activity_stream_create(sender, instance, created, **kwargs):
