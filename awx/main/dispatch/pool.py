@@ -287,6 +287,18 @@ class WorkerPool(object):
             logger.exception('could not kill {}'.format(worker.pid))
 
 
+class CallbackReceiverPool(WorkerPool):
+
+    def write(self, *args, **kw):
+        # if callback receiver workers exit, replace them with new ones
+        ret = super(CallbackReceiverPool, self).write(*args, **kw)
+        for w in self.workers:
+            if not w.alive:
+                self.workers.remove(w)
+                logger.error('worker pid:{} is gone (exit={})'.format(w.pid, w.exitcode))
+                self.up()
+
+
 class AutoscalePool(WorkerPool):
     '''
     An extended pool implementation that automatically scales workers up and

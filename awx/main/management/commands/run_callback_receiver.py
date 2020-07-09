@@ -4,6 +4,7 @@
 from django.conf import settings
 from django.core.management.base import BaseCommand
 
+from awx.main.dispatch.pool import CallbackReceiverPool
 from awx.main.dispatch.worker import AWXConsumerRedis, CallbackBrokerWorker
 
 
@@ -21,7 +22,8 @@ class Command(BaseCommand):
             consumer = AWXConsumerRedis(
                 'callback_receiver',
                 CallbackBrokerWorker(),
-                queues=[getattr(settings, 'CALLBACK_QUEUE', '')],
+                [getattr(settings, 'CALLBACK_QUEUE', '')],
+                CallbackReceiverPool(),
             )
             consumer.run()
         except KeyboardInterrupt:

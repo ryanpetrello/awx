@@ -20,13 +20,19 @@ from awx.main.models import (JobEvent, AdHocCommandEvent, ProjectUpdateEvent,
 from awx.main.tasks import handle_success_and_failure_notifications
 from awx.main.models.events import emit_event_detail
 
-from .base import BaseWorker
+from .base import BaseWorker, MaxEventsReceived
 
 logger = logging.getLogger('awx.main.commands.run_callback_receiver')
 
 # the number of seconds to buffer events in memory before flushing
 # using JobEvent.objects.bulk_create()
 BUFFER_SECONDS = .1
+
+# the (maximum) chunk size of JobEvent.objects.bulk_create() to buffer
+BUFFER_SIZE = 1000
+
+# after handling this number of messages, the callback receiver worker will exit
+MAX_WRITES = BUFFER_SIZE * 50
 
 
 class CallbackBrokerWorker(BaseWorker):
@@ -43,6 +49,7 @@ class CallbackBrokerWorker(BaseWorker):
 
     def __init__(self):
         self.buff = {}
+        self.counter = 0
 
     def read(self, queue):
         try:
@@ -74,9 +81,10 @@ class CallbackBrokerWorker(BaseWorker):
         now = tz_now()
         if (
             force or
-            any([len(events) >= 1000 for events in self.buff.values()])
+            any([len(events) >= BUFFER_SIZE for events in self.buff.values()])
         ):
             for cls, events in self.buff.items():
+                self.counter += len(events)
                 logger.debug(f'{cls.__name__}.objects.bulk_create({len(events)})')
                 for e in events:
                     if not e.created:
@@ -158,6 +166,10 @@ class CallbackBrokerWorker(BaseWorker):
             while retries <= self.MAX_RETRIES:
                 try:
                     self.flush(force=flush)
+                    if self.counter > MAX_WRITES:
+                        raise MaxEventsReceived(
+                            f'worker pid:{os.getpid()} has handled {self.counter} messages, exiting'
+                        )
                     break
                 except (OperationalError, InterfaceError, InternalError):
                     if retries >= self.MAX_RETRIES:
@@ -174,6 +186,8 @@ class CallbackBrokerWorker(BaseWorker):
                 except DatabaseError:
                     logger.exception('Database Error Saving Job Event')
                     break
+        except MaxEventsReceived:
+            raise
         except Exception as exc:
             tb = traceback.format_exc()
             logger.error('Callback Task Processor Raised Exception: %r', exc)

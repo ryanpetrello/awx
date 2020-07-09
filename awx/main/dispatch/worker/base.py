@@ -42,6 +42,10 @@ class WorkerSignalHandler:
         self.kill_now = True
 
 
+class MaxEventsReceived(Exception):
+    pass
+
+
 class AWXConsumerBase(object):
     def __init__(self, name, worker, queues=[], pool=None):
         self.should_stop = False
@@ -189,6 +193,9 @@ class BaseWorker(object):
                     # so we can establish a new connection
                     conn.close_if_unusable_or_obsolete()
                 self.perform_work(body, *args)
+            except MaxEventsReceived as exc:
+                logger.debug(exc)
+                signal_handler.kill_now = True
             finally:
                 if 'uuid' in body:
                     uuid = body['uuid']
