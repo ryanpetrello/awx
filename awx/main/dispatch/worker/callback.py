@@ -1,4 +1,5 @@
 import cProfile
+import io
 import json
 import logging
 import os
@@ -14,7 +15,7 @@ from django.db import DatabaseError, OperationalError, connection as django_conn
 from django.db.utils import InterfaceError, InternalError, IntegrityError
 
 import psutil
-
+import psycopg2
 import redis
 
 from awx.main.consumers import emit_channel_notification
@@ -27,6 +28,60 @@ from awx.main.models.events import emit_event_detail
 from .base import BaseWorker
 
 logger = logging.getLogger('awx.main.commands.run_callback_receiver')
+
+
+EVENT_COLS = {
+    'main_jobevent': (
+        'created', 'modified', 'event', 'event_data', 'failed', 'changed',
+        'host_name', 'play', 'role', 'task', 'counter', 'host_id', 'job_id',
+        'uuid', 'parent_uuid', 'end_line', 'playbook', 'start_line',
+        'stdout', 'verbosity'
+    )
+}
+
+
+def clean_csv_value(value):
+    # The string "\N" is the default string used by PostgreSQL to indicate NULL in COPY
+    if value is None:
+        return r'\N'
+    return str(value).replace('\n', '\\n').replace('\r', '\\r')
+
+
+class StringIteratorIO(io.TextIOBase):
+
+    def __init__(self, i):
+        self._iter = i
+        self._buff = ''
+
+    def readable(self):
+        return True
+
+    def _readone(self, n):
+        while not self._buff:
+            try:
+                self._buff = next(self._iter)
+            except StopIteration:
+                break
+        ret = self._buff[:n]
+        self._buff = self._buff[len(ret):]
+        return ret
+
+    def read(self, n):
+        line = []
+        if n is None or n < 0:
+            while True:
+                m = self._readone()
+                if not m:
+                    break
+                line.append(m)
+        else:
+            while n > 0:
+                m = self._readone(n)
+                if not m:
+                    break
+                n -= len(m)
+                line.append(m)
+        return ''.join(line)
 
 
 class CallbackBrokerWorker(BaseWorker):
@@ -107,38 +162,45 @@ class CallbackBrokerWorker(BaseWorker):
         return super(CallbackBrokerWorker, self).work_loop(*args, **kw)
 
     def flush(self, force=False):
-        now = tz_now()
         if (
             force or
             any([len(events) >= 1000 for events in self.buff.values()])
         ):
-            for cls, events in self.buff.items():
-                logger.debug(f'{cls.__name__}.objects.bulk_create({len(events)})')
-                for e in events:
-                    if not e.created:
-                        e.created = now
-                    e.modified = now
-                try:
-                    cls.objects.bulk_create(events)
-                except Exception as exc:
-                    # if an exception occurs, we should re-attempt to save the
-                    # events one-by-one, because something in the list is
-                    # broken/stale (e.g., an IntegrityError on a specific event)
-                    for e in events:
-                        try:
-                            if (
-                                isinstance(exc, IntegrityError) and
-                                getattr(e, 'host_id', '')
-                            ):
-                                # this is one potential IntegrityError we can
-                                # work around - if the host disappears before
-                                # the event can be processed
-                                e.host_id = None
-                            e.save()
-                        except Exception:
-                            logger.exception('Database Error Saving Job Event')
-                for e in events:
-                    emit_event_detail(e)
+            with django_connection.cursor() as cursor:
+                for cls, events in self.buff.items():
+                    try:
+                        cursor.copy_from(
+                            StringIteratorIO(iter(events)),
+                            'main_jobevent',
+                            sep='~',
+                            columns=EVENT_COLS['main_jobevent']
+                        )
+                    except psycopg2.errors.BadCopyFileFormat as exc:
+                        logger.exception('Database Error Saving Job Event')
+                        pass
+                #    logger.debug(f'{cls.__name__}.objects.bulk_create({len(events)})')
+                #    try:
+                #        cls.objects.bulk_create(events)
+                #    except Exception as exc:
+                #        # if an exception occurs, we should re-attempt to save the
+                #        # events one-by-one, because something in the list is
+                #        # broken/stale (e.g., an IntegrityError on a specific event)
+                #        for e in events:
+                #            try:
+                #                if (
+                #                    isinstance(exc, IntegrityError) and
+                #                    getattr(e, 'host_id', '')
+                #                ):
+                #                    # this is one potential IntegrityError we can
+                #                    # work around - if the host disappears before
+                #                    # the event can be processed
+                #                    e.host_id = None
+                #                e.save()
+                #            except Exception:
+                #                logger.exception('Database Error Saving Job Event')
+                #    for e in events:
+                #        emit_event_detail(e)
+                # TODO: FIX WEBSOCKET EMIT
             self.buff = {}
 
     def perform_work(self, body):
@@ -192,6 +254,33 @@ class CallbackBrokerWorker(BaseWorker):
                     return
 
                 event = cls.create_from_data(**body)
+
+                now = tz_now().isoformat()
+                event = '~'.join([
+                    clean_csv_value(v)
+                    for v in (
+                        now,       # FIXME: created
+                        now,               # modified
+                        event.get('event', '') or '',
+                        json.dumps(event.get('event_data', '{}')) or '',
+                        False,                              # failed
+                        True,                               # changed
+                        event.get('host_name', '') or '',
+                        event.get('play', '') or '',
+                        event.get('role', '') or '',
+                        event.get('task', '') or '',
+                        event.get('counter', 0) or 0,
+                        1,                                  # FIXME: host_id
+                        event.get(key),                     # job_id
+                        event['uuid'],
+                        event.get('parent_uuid', '') or '',
+                        event.get('end_line', 0) or 0,
+                        event.get('playbook', '') or '',
+                        event.get('start_line', 0) or 0,
+                        event['stdout'] or '',
+                        event.get('verbosity') or 0,
+                    )
+                ]) + '\n'
                 self.buff.setdefault(cls, []).append(event)
 
             retries = 0

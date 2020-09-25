@@ -424,6 +424,7 @@ class BasePlaybookEvent(CreatedModifiedModel):
 
         sanitize_event_keys(kwargs, cls.VALID_KEYS)
         workflow_job_id = kwargs.pop('workflow_job_id', None)
+        return kwargs
         event = cls(**kwargs)
         if workflow_job_id:
             setattr(event, 'workflow_job_id', workflow_job_id)
