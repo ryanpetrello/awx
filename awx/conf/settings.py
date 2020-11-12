@@ -51,7 +51,7 @@ SETTING_CACHE_EMPTY_LIST = '___[]___'
 SETTING_CACHE_EMPTY_DICT = '___{}___'
 
 # Expire settings from cache after this many seconds.
-SETTING_CACHE_TIMEOUT = 60
+SETTING_CACHE_TIMEOUT = 5
 
 # Flag indicating whether to store field default values in the cache.
 SETTING_CACHE_DEFAULTS = True
